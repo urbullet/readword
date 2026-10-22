@@ -40,8 +40,8 @@ module Readword
     MAX_PAPX_RUNS_PER_PAGE = 0x1D
     MAX_CHPX_RUNS_PER_PAGE = 0x65
     # Limits against crafted files, so the reader cannot be made to work forever.
-    MAX_PROPERTY_BYTES = 8 * 1024 * 1024
-    MAX_TEXT_POSITIONS = 400_000
+    TEXT_POSITIONS_PER_MEGABYTE = 40_000
+    PROPERTY_BYTES_PER_MEGABYTE = 800 * 1024
     NO_FLAGS = {}.freeze
 
     # Paragraph sprms: in a table, end of a table row, and the same two for a table nested in a cell.
@@ -89,7 +89,9 @@ module Readword
       byte.chr.force_encoding(Encoding::Windows_1252).encode(Encoding::UTF_8, undef: :replace, replace: '')
     end.freeze
 
-    def initialize(bytes)
+    def initialize(bytes, max_size: DEFAULT_MAX_SIZE)
+      @max_text_positions = max_size ? max_size * TEXT_POSITIONS_PER_MEGABYTE : Float::INFINITY
+      @max_property_bytes = max_size ? max_size * PROPERTY_BYTES_PER_MEGABYTE : Float::INFINITY
       @file = CompoundFile.new(bytes)
       @word = @file.stream('WordDocument').to_s
       raise Error, PASSWORD_PROTECTED if @word.empty? && @file.stream?('EncryptedPackage')
@@ -102,7 +104,7 @@ module Readword
 
     def blocks
       pieces = text_pieces
-      raise Error, TOO_LONG if pieces.sum { |piece| [piece.finish - piece.start, 0].max } > MAX_TEXT_POSITIONS
+      raise Error, TOO_LONG if pieces.sum { |piece| [piece.finish - piece.start, 0].max } > @max_text_positions
 
       @property_bytes = 0
       @runs = paragraph_runs
@@ -351,7 +353,7 @@ module Readword
       table = clx.byteslice(position + 5, u32(clx, position + 1).to_i).to_s
       count = (table.bytesize - 4) / 12
       raise Error, UNREADABLE unless count.positive?
-      raise Error, TOO_LONG if count > MAX_TEXT_POSITIONS
+      raise Error, TOO_LONG if count > @max_text_positions
 
       positions = table.unpack("V#{count + 1}")
       Array.new(count) do |index|
@@ -366,7 +368,7 @@ module Readword
       runs = []
       property_pages(FIB_PAPX_TABLE, FIB_PAPX_TABLE_BYTES).each do |offset|
         runs.concat(page_runs(offset))
-        raise Error, TOO_LONG if runs.size > MAX_TEXT_POSITIONS
+        raise Error, TOO_LONG if runs.size > @max_text_positions
       end
       runs.sort_by(&:start)
     end
@@ -375,7 +377,7 @@ module Readword
       runs = []
       property_pages(FIB_CHPX_TABLE, FIB_CHPX_TABLE_BYTES).each do |offset|
         runs.concat(character_runs(offset).select { |run| run.flags[:deleted] || run.flags[:symbol] })
-        raise Error, TOO_LONG if runs.size > MAX_TEXT_POSITIONS
+        raise Error, TOO_LONG if runs.size > @max_text_positions
       end
       runs.sort_by(&:start)
     end
@@ -436,7 +438,7 @@ module Readword
 
     def sprm_flags(grpprl, nested: false)
       @property_bytes += grpprl.bytesize
-      raise Error, UNREADABLE if @property_bytes > MAX_PROPERTY_BYTES
+      raise Error, UNREADABLE if @property_bytes > @max_property_bytes
 
       flags = {}
       position = 0

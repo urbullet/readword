@@ -63,6 +63,22 @@ class CliTest < Minitest::Test
     assert_includes errors, 'The Word document is longer than the reader takes.'
   end
 
+  test 'refuses a document over --max-size, and reads it once the size is raised' do
+    namespace = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+    body = "<w:p><w:r><w:t>Results</w:t></w:r></w:p>#{' ' * (Readword::MEGABYTE + 1)}"
+    Tempfile.create(['big', '.docx']) do |file|
+      file.binmode
+      file.write(zip_with('word/document.xml' => "<w:document #{namespace}><w:body>#{body}</w:body></w:document>"))
+      file.close
+
+      _, errors, = readword('--max-size', '1', file.path)
+      output, = readword('--max-size', '2', file.path)
+
+      assert_includes errors, 'The Word document is longer than the reader takes.'
+      assert_equal "Results\n", output
+    end
+  end
+
   test 'prints the usage when no file is given' do
     _, errors, status = readword
 

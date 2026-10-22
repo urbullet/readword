@@ -5,8 +5,7 @@ require 'zip'
 module Readword
   # Reads the text of a Word 2007 or later .docx (ECMA-376 WordprocessingML) from its XML parts.
   class Docx
-    MAX_XML_BYTES = 10 * 1024 * 1024
-    MAX_XML_NODES = 400_000
+    NODES_PER_MEGABYTE = 40_000
     MAX_GRID_SPAN = 63
     MAX_STYLE_DEPTH = 16
     UTF16_STARTS = ["\xFF\xFE".b, "\xFE\xFF".b, "<\0".b, "\0<".b].freeze
@@ -21,8 +20,10 @@ module Readword
                 'lowerLetter' => :lower_letter, 'decimalZero' => :decimal_zero, 'ordinal' => :ordinal,
                 'bullet' => :bullet, 'none' => :none }.freeze
 
-    def initialize(bytes)
+    def initialize(bytes, max_size: DEFAULT_MAX_SIZE)
       @bytes = bytes
+      @max_xml_bytes = max_size ? max_size * MEGABYTE : Float::INFINITY
+      @max_xml_nodes = max_size ? max_size * NODES_PER_MEGABYTE : Float::INFINITY
     end
 
     def blocks
@@ -73,10 +74,10 @@ module Readword
 
     def xml(path, budget = :content)
       entry = @entries[path.downcase] or return
-      remaining = MAX_XML_BYTES - @budgets[budget][:bytes]
+      remaining = @max_xml_bytes - @budgets[budget][:bytes]
       raise Error, TOO_LONG if entry.size > remaining
 
-      data = entry.get_input_stream { |stream| stream.read(remaining + 1) }.to_s
+      data = entry.get_input_stream { |stream| stream.read(remaining.finite? ? remaining + 1 : nil) }.to_s
       raise Error, TOO_LONG if data.bytesize > remaining
 
       @budgets[budget][:bytes] += data.bytesize
@@ -271,7 +272,7 @@ module Readword
 
     def count_nodes(count, budget = :content)
       @budgets[budget][:nodes] += count
-      raise Error, TOO_LONG if @budgets[budget][:nodes] > MAX_XML_NODES
+      raise Error, TOO_LONG if @budgets[budget][:nodes] > @max_xml_nodes
     end
 
     def children_named(node, name)

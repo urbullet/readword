@@ -72,9 +72,9 @@ class ReadwordTest < Minitest::Test
   end
 
   test 'a .docx with many wide cells is refused as too long once their columns pass the node budget' do
-    cells = Array.new(20_000) { cell('<w:p/>', span: Readword::Docx::MAX_GRID_SPAN) }
+    cells = Array.new(1_000) { cell('<w:p/>', span: Readword::Docx::MAX_GRID_SPAN) }
 
-    error = assert_raises(Readword::Error) { Readword.convert(docx(table(row(*cells)))) }
+    error = assert_raises(Readword::Error) { Readword.convert(docx(table(row(*cells))), max_size: 1) }
 
     assert_equal Readword::TOO_LONG, error.reason
   end
@@ -179,28 +179,28 @@ class ReadwordTest < Minitest::Test
   end
 
   test 'a .docx part bigger than the limit is refused as too long without reading all of it' do
-    bytes = zip_with('word/document.xml' => ' ' * (Readword::Docx::MAX_XML_BYTES + 1))
+    bytes = zip_with('word/document.xml' => ' ' * (Readword::MEGABYTE + 1))
 
-    error = assert_raises(Readword::Error) { Readword.convert(bytes) }
+    error = assert_raises(Readword::Error) { Readword.convert(bytes, max_size: 1) }
 
     assert_equal Readword::TOO_LONG, error.reason
   end
 
   test 'a .docx whose parts each fit the limit but together do not is refused as too long' do
-    padding = ' ' * (Readword::Docx::MAX_XML_BYTES / 2)
+    padding = ' ' * (Readword::MEGABYTE / 2)
     parts = { 'word/header1.xml' => "<w:hdr #{NAMESPACES}>#{paragraph('Example Lab Test Report')}#{padding}</w:hdr>" }
     relationships = "<Relationship Id=\"rId1\" Type=\"#{RELATIONSHIPS}/header\" Target=\"header1.xml\"/>"
     bytes = docx(paragraph('Results') + padding, parts: parts, relationships: relationships)
 
-    error = assert_raises(Readword::Error) { Readword.convert(bytes) }
+    error = assert_raises(Readword::Error) { Readword.convert(bytes, max_size: 1) }
 
     assert_equal Readword::TOO_LONG, error.reason
   end
 
   test 'a .docx with more XML nodes than the reader takes, attributes included, is refused as too long' do
-    body = '<w:p w:x="1"/>' * ((Readword::Docx::MAX_XML_NODES / 2) + 1)
+    body = '<w:p w:x="1"/>' * ((Readword::Docx::NODES_PER_MEGABYTE / 2) + 1)
 
-    error = assert_raises(Readword::Error) { Readword.convert(docx(body)) }
+    error = assert_raises(Readword::Error) { Readword.convert(docx(body), max_size: 1) }
 
     assert_equal Readword::TOO_LONG, error.reason
   end
@@ -354,9 +354,9 @@ class ReadwordTest < Minitest::Test
   end
 
   test 'a .doc with more text than the parser takes is refused as too long before any of it is read' do
-    bytes = lims_report_doc.sub([2, 16, 0, 262].pack('CVV2')) { [2, 16, 0, Readword::Doc::MAX_TEXT_POSITIONS + 1].pack('CVV2') }
+    bytes = lims_report_doc.sub([2, 16, 0, 262].pack('CVV2')) { [2, 16, 0, Readword::Doc::TEXT_POSITIONS_PER_MEGABYTE + 1].pack('CVV2') }
 
-    error = assert_raises(Readword::Error) { Readword.convert(bytes) }
+    error = assert_raises(Readword::Error) { Readword.convert(bytes, max_size: 1) }
 
     assert_equal Readword::TOO_LONG, error.reason
   end
@@ -563,6 +563,21 @@ class ReadwordTest < Minitest::Test
     body = paragraph('# of samples: 5') + paragraph('> 10 mg/kg') + paragraph('| not a table')
 
     assert_equal "\\# of samples: 5\n\n\\> 10 mg/kg\n\n\\| not a table", Readword.convert(docx(body))
+  end
+
+  test 'a document over the size limit reads once the limit is raised' do
+    bytes = docx(paragraph('Results') + (' ' * (Readword::MEGABYTE + 1)))
+
+    error = assert_raises(Readword::Error) { Readword.convert(bytes, max_size: 1) }
+
+    assert_equal Readword::TOO_LONG, error.reason
+    assert_equal 'Results', Readword.convert(bytes, max_size: 2)
+  end
+
+  test 'a size limit of nil or 0 turns the limit off' do
+    bytes = docx(paragraph('Results') + (' ' * (Readword::MEGABYTE + 1)))
+
+    assert_equal(['Results'] * 2, [nil, 0].map { |max_size| Readword.convert(bytes, max_size: max_size) })
   end
 
   test 'each refusal reason has its own message' do

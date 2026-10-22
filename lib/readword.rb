@@ -15,6 +15,8 @@ module Readword
     0xB0 => '°', 0xB1 => '±', 0xB3 => '≥', 0xB4 => '×', 0xB7 => '•', 0xB9 => '≠', 0xBB => '≈'
   }.freeze
   ZIP_SIGNATURE = "PK\x03\x04".b.freeze
+  DEFAULT_MAX_SIZE = 32
+  MEGABYTE = 1024 * 1024
 
   UNREADABLE = :unreadable
   NO_TEXT = :no_text
@@ -44,8 +46,9 @@ module Readword
     convert(File.binread(path), **options)
   end
 
-  def self.convert(bytes, max_characters: nil)
-    text = Markdown.render(reader(bytes.b).blocks).split("\n").map(&:rstrip).join("\n").gsub(/\n{3,}/, "\n\n").strip
+  def self.convert(bytes, max_characters: nil, max_size: DEFAULT_MAX_SIZE)
+    max_size = nil unless max_size.to_i.positive?
+    text = Markdown.render(reader(bytes.b, max_size).blocks).split("\n").map(&:rstrip).join("\n").gsub(/\n{3,}/, "\n\n").strip
     raise Error, NO_TEXT if text.empty?
     raise Error, TOO_LONG if max_characters && text.size > max_characters
 
@@ -56,9 +59,9 @@ module Readword
     raise Error, UNREADABLE
   end
 
-  def self.reader(bytes)
-    if bytes.start_with?(CompoundFile::SIGNATURE) then Doc.new(bytes)
-    elsif bytes.start_with?(ZIP_SIGNATURE) then Docx.new(bytes)
+  def self.reader(bytes, max_size)
+    if bytes.start_with?(CompoundFile::SIGNATURE) then Doc.new(bytes, max_size: max_size)
+    elsif bytes.start_with?(ZIP_SIGNATURE) then Docx.new(bytes, max_size: max_size)
     else raise Error, UNREADABLE
     end
   end
