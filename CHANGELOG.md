@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 (2026-10-22)
+
+Same code as 0.1.0. Only the author name in the gem's details changed.
+
 ## 0.1.0 (2026-10-22)
 
 First release.
