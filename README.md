@@ -98,9 +98,33 @@ Readword.convert_file('manual.docx', max_size: 100)      # a size limit of 100 M
 
 ## How it was checked
 
-readword was compared with Apache Tika, LibreOffice and macOS textutil on 650 Word files from the Apache POI and LibreOffice test suites.
+readword was compared with Apache Tika, LibreOffice and macOS textutil on 650 Word files from the Apache POI and LibreOffice test suites, and with other tools that read Word files.
 
-| | antiword 0.37 | docx gem 0.13 | readword |
+### Compared with anydoc
+
+[anydoc](https://github.com/firecrawl/anydoc) is Firecrawl's open-source converter, written in Rust. It reads many formats and also runs as an MCP server. Version 0.2.4 was run on the same 650 files. The counts below are for the 300 `.doc` and 212 `.docx` files where both Tika and textutil found text.
+
+| | anydoc 0.2.4 | readword 0.2 |
+| --- | --- | --- |
+| `.doc` files read | 260 | 281 |
+| `.doc` files missing words that both Tika and textutil found | 122 | 29, of which 13 are Word 6 or 95 files that neither tool reads |
+| Text left out of `.doc` files | page headers and footers, comments, some text boxes | field codes, embedded objects |
+| `.doc` files saved by macOS TextEdit | refused | read |
+| `.docx` files read | 208 | 210 |
+| `.docx` files missing words that both Tika and textutil found | 9, for example content controls in tables and deeply nested tables | 2: an entity test file refused on purpose, and a link that splits a name from its footnote number |
+| List numbers | ordinal styles shown as plain numbers, some continued and restarted lists numbered differently | match LibreOffice |
+| Lists inside table cells | numbers dropped | numbers kept |
+| Bold, italics and links | kept | kept |
+| Other formats | PDF, PowerPoint, Excel, OpenDocument, RTF, EPUB, CSV and more | none |
+| Median time per file | 0.2 ms | 0.5 ms |
+| 10,000 crafted `.doc` files | no crash or hang | no crash or hang |
+| Use from | Rust, Node, Python, WebAssembly, command line, MCP | Ruby, command line |
+
+For Word files, readword keeps more of the text and the list numbers Word shows. anydoc is the better pick for other formats or when speed matters most.
+
+### Compared with antiword and the docx gem
+
+| | antiword 0.37 | docx gem 0.13 | readword 0.1 |
 | --- | --- | --- | --- |
 | Reads `.doc` | yes | no | yes |
 | Reads `.docx` | no | yes | yes |
@@ -112,7 +136,7 @@ readword was compared with Apache Tika, LibreOffice and macOS textutil on 650 Wo
 | A 1 MB zip that unpacks to 1 GB | | 3.2 GB of memory used | refused in 0.17 s |
 | Install | system package (no Homebrew formula) | gem | gem |
 
-The words readword misses are field codes, embedded objects, charts and picture names.
+This comparison was made earlier, with readword 0.1 and a smaller set of the test files. The words readword misses are field codes, embedded objects, charts and picture names.
 
 List numbers were compared with LibreOffice's on the 45 test files that have numbered lists. All numbers match in 41 of them. Of the other four, two are deliberately corrupted fuzz files, one changed its numbering with Track Changes, and one numbers an empty paragraph that holds a section break, where LibreOffice drops the paragraph.
 
