@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0 (2026-10-22)
+
+- Keeps bold, italics and links, as `**bold**`, `*italic*` and `[text](url)`. Only links to web pages and email addresses are kept. Headings, and header cells that are bold as a whole, stay plain.
+- The size limit is now an option: `max_size:` in Ruby and `--max-size` on the command line, in megabytes. The default went up from 10 to 32, which reads a 300-page report, and 0 turns the limit off.
+
 ## 0.1.1 (2026-10-22)
 
 Same code as 0.1.0. Only the author name in the gem's details changed.
