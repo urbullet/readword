@@ -75,23 +75,23 @@ module Readword
       @table = @file.stream(fib_flags.anybits?(TABLE_STREAM_ONE) ? '1Table' : '0Table') || raise(Error, UNREADABLE)
     end
 
-    def lines
+    def blocks
       pieces = text_pieces
       raise Error, TOO_LONG if pieces.sum { |piece| [piece.finish - piece.start, 0].max } > MAX_TEXT_POSITIONS
 
       @property_bytes = 0
       @runs = paragraph_runs
       @marked = marked_runs
-      @lines = []
+      @blocks = []
       @row = []
       @text = +''
       read_characters(pieces)
       if @row.any?
         end_row
       else
-        @lines << @text
+        @blocks << Paragraph.new(text: @text)
       end
-      @lines
+      @blocks
     end
 
     private
@@ -138,7 +138,7 @@ module Readword
       elsif flags[:in_table] then @text << ' '
       else
         end_row if @row.any?
-        @lines << @text
+        @blocks << Paragraph.new(text: @text)
         @text = +''
       end
     end
@@ -150,7 +150,7 @@ module Readword
 
     def end_row
       end_cell unless Readword.blank?(@text)
-      @lines.concat(Readword.row_lines(@row))
+      @blocks << Row.new(@row) unless @row.all? { |cell| Readword.blank?(cell) }
       @row = []
       @text = +''
     end

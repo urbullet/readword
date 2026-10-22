@@ -19,7 +19,9 @@ class ReadwordTest < Minitest::Test
 
     assert_equal <<~TEXT.chomp, Readword.convert(docx(body))
       Test Report No. 2026/0815
+
       | Substance | Result (µg/kg) |  |
+      | --- | --- | --- |
       | Bisphenol A | <5 | 5 |
       | Benzene |  | 10 |
     TEXT
@@ -32,8 +34,12 @@ class ReadwordTest < Minitest::Test
 
     assert_equal <<~TEXT.chomp, Readword.convert(docx(body))
       | Bisphenol A (BPA) | 80-05-7 |
+      | --- | --- |
+
       Volatiles
+
       | Toluene | 120 |
+      | --- | --- |
     TEXT
   end
 
@@ -46,7 +52,7 @@ class ReadwordTest < Minitest::Test
     ]
 
     wrappers.each do |wrapped|
-      assert_equal "Volatiles\n| Toluene | 120 |", Readword.convert(docx(table(row(cell(paragraph('Volatiles') + wrapped)))))
+      assert_equal "Volatiles\n\n| Toluene | 120 |\n| --- | --- |", Readword.convert(docx(table(row(cell(paragraph('Volatiles') + wrapped)))))
     end
   end
 
@@ -56,13 +62,13 @@ class ReadwordTest < Minitest::Test
 
     text = Readword.convert(docx(table(row(cell(paragraph('Volatiles') + box)))))
 
-    assert_equal ['Volatiles', '| Toluene | 120 |'], text.lines(chomp: true).reject(&:empty?)
+    assert_equal ['Volatiles', '| Toluene | 120 |', '| --- | --- |'], text.lines(chomp: true).reject(&:empty?)
   end
 
   test 'a .docx cell claiming a huge column span fills at most the 63 columns a Word table can have' do
     body = table(row(cell(paragraph('x'), span: 1_000_000_000)))
 
-    assert_equal "| #{(['x'] + ([''] * 62)).join(' | ')} |", Readword.convert(docx(body))
+    assert_equal "| #{(['x'] + ([''] * 62)).join(' | ')} |\n| #{(['---'] * 63).join(' | ')} |", Readword.convert(docx(body))
   end
 
   test 'a .docx with many wide cells is refused as too long once their columns pass the node budget' do
@@ -87,8 +93,11 @@ class ReadwordTest < Minitest::Test
 
     assert_equal <<~TEXT.chomp, Readword.convert(docx(paragraph('Results'), parts: parts, relationships: relationships.join))
       Example Lab Test Report
+
       Results
+
       LOQ: limit of quantification
+
       Page 1 of 1
     TEXT
   end
@@ -106,7 +115,9 @@ class ReadwordTest < Minitest::Test
 
     assert_equal <<~TEXT.chomp, Readword.convert(docx(paragraph('Results'), parts: parts, relationships: relationships.join))
       Example Lab Test Report
+
       Results
+
       LOQ: limit of quantification
     TEXT
   end
@@ -118,7 +129,7 @@ class ReadwordTest < Minitest::Test
            '<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>3</w:t></w:r>' \
            '<w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'
 
-    assert_equal "Result: 15\n3", Readword.convert(docx(body))
+    assert_equal "Result: 15\n\n3", Readword.convert(docx(body))
   end
 
   test 'a field nested in the code of another .docx field is left out, so its result is not read twice' do
@@ -128,7 +139,7 @@ class ReadwordTest < Minitest::Test
              "<w:r><w:instrText> = \"\" \"n.d.\" </w:instrText></w:r>#{inner}" \
              '<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>12</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'
 
-    assert_equal '| Benzene | 12 |', Readword.convert(docx(table(row(cell(paragraph('Benzene')), cell(result)))))
+    assert_equal "| Benzene | 12 |\n| --- | --- |", Readword.convert(docx(table(row(cell(paragraph('Benzene')), cell(result)))))
   end
 
   test 'Symbol-font characters in a .docx come out as the real characters' do
@@ -206,12 +217,17 @@ class ReadwordTest < Minitest::Test
   test 'a .doc report keeps its paragraphs, table rows, empty cells and special characters' do
     assert_equal <<~TEXT.chomp, Readword.convert(lims_report_doc)
       Test Report No. 2026/0815
+
       Customer reference: ABC-123
+
       Simulant: Ethanol 10% (v/v), 10 days at 40 °C
+
       | Substance | CAS No. | Result (µg/kg) | LOQ (µg/kg) |
+      | --- | --- | --- | --- |
       | Bisphenol A (BPA) | 80-05-7 | <5 | 5 |
       | Benzene |  | n.d. | 10 |
       | Toluene | 108-88-3 | 120 ± 15 |  |
+
       Results ≤ LOQ are reported as “<LOQ”.
     TEXT
   end
@@ -219,11 +235,16 @@ class ReadwordTest < Minitest::Test
   test 'a .doc table row deleted with track changes is left out, the way tracked deletions are in a .docx' do
     assert_equal <<~TEXT.chomp, Readword.convert(fixture('lims_report_deleted_row.doc'))
       Test Report No. 2026/0815
+
       Customer reference: ABC-123
+
       Simulant: Ethanol 10% (v/v), 10 days at 40 °C
+
       | Substance | CAS No. | Result (µg/kg) | LOQ (µg/kg) |
+      | --- | --- | --- | --- |
       | Bisphenol A (BPA) | 80-05-7 | <5 | 5 |
       | Toluene | 108-88-3 | 120 ± 15 |  |
+
       Results ≤ LOQ are reported as “<LOQ”.
     TEXT
   end
@@ -246,10 +267,14 @@ class ReadwordTest < Minitest::Test
   test 'a .doc that stores its text as single bytes, the way Word saves Western text, keeps its paragraphs, table rows and special characters' do
     assert_equal <<~TEXT.chomp, Readword.convert(fixture('lims_report_8bit.doc'))
       Test Report No. 2026/0816
+
       Simulant: Ethanol 10% (v/v), 10 days at 40 °C
+
       | Substance | Result (µg/kg) | LOQ |
+      | --- | --- | --- |
       | Bisphenol A | <5 | 5 |
       | Benzene |  | 10 |
+
       Uncertainty ± 20 % – “typical”
     TEXT
   end
@@ -262,10 +287,14 @@ class ReadwordTest < Minitest::Test
 
     assert_equal <<~TEXT.chomp, Readword.convert(bytes)
       Test Report No. 2026/0816
+
       Simulant: Ethanol 10% (v/v), 10 days at 40 °C
+
       | Substance | Result (µg/kg) |  |
+      | --- | --- | --- |
       | Z | <5 | 5 |
       | Bz |  | 10 |
+
       Uncertainty ± 20 % – “typical”
     TEXT
   end
@@ -361,6 +390,128 @@ class ReadwordTest < Minitest::Test
     assert_equal Readword.convert(lims_report_doc), Readword.convert_file(path)
   end
 
+  test 'Word headings in a .docx become Markdown headings, found by style name, outline level or the style they are based on' do
+    styles = [style('Title', 'Title'), style('Heading1', 'heading 1', '<w:outlineLvl w:val="0"/>'), style('Heading2', 'heading 2'),
+              style('berschrift3', 'heading 3'), style('ResultsHeading', 'Results heading', based_on: 'Heading2')]
+    body = styled('Migration test plan', 'Title') + styled('Scope', 'Heading1') + styled('Simulants', 'Heading2') +
+           styled('Conditions', 'berschrift3') + styled('Results', 'ResultsHeading') +
+           '<w:p><w:pPr><w:outlineLvl w:val="1"/></w:pPr><w:r><w:t>Outlined</w:t></w:r></w:p>' \
+           '<w:p><w:pPr><w:pStyle w:val="Heading1"/><w:outlineLvl w:val="9"/></w:pPr><w:r><w:t>Body text</w:t></w:r></w:p>'
+
+    assert_equal <<~TEXT.chomp, Readword.convert(formatted_docx(body, styles: styles))
+      # Migration test plan
+
+      # Scope
+
+      ## Simulants
+
+      ### Conditions
+
+      ## Results
+
+      ## Outlined
+
+      Body text
+    TEXT
+  end
+
+  test 'bullet and numbered lists in a .docx keep their nesting and the numbers Word shows' do
+    abstracts = { '0' => [level(0, 'bullet', 'o'), level(1, 'bullet', 'o')],
+                  '1' => [level(0, 'decimal', '%1.'), level(1, 'lowerLetter', '%2)'), level(2, 'lowerRoman', '%3.')] }
+    body = listed('Bisphenol A', 1) + listed('food simulant A', 1, 1) + listed('Toluene', 1) + paragraph('Steps') +
+           listed('Prepare the sample', 2) + listed('at 40 C', 2, 1) + listed('for 10 days', 2, 1) +
+           listed('check daily', 2, 2) + listed('Measure', 2)
+
+    assert_equal <<~TEXT.chomp, Readword.convert(formatted_docx(body, abstracts: abstracts, nums: { '1' => '0', '2' => '1' }))
+      - Bisphenol A
+        - food simulant A
+      - Toluene
+
+      Steps
+
+      1. Prepare the sample
+         - a) at 40 C
+         - b) for 10 days
+           - i. check daily
+      2. Measure
+    TEXT
+  end
+
+  test 'a .docx list restarted in Word counts from its start again, and a list continued later keeps counting' do
+    restart = '<w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride>'
+    nums = { '2' => '1', '3' => ['1', restart], '4' => '1' }
+    body = listed('first', 2) + listed('second', 2) + paragraph('Then') + listed('again', 3) + listed('and again', 3) +
+           paragraph('Later') + listed('continued', 4)
+
+    assert_equal <<~TEXT.chomp, Readword.convert(formatted_docx(body, abstracts: { '1' => [level(0, 'decimal', '%1.')] }, nums: nums))
+      1. first
+      2. second
+
+      Then
+
+      1. again
+      2. and again
+
+      Later
+
+      3. continued
+    TEXT
+  end
+
+  test 'a .docx list that redefines a level keeps counting with its list but shows the new number style' do
+    letters = "<w:lvlOverride w:ilvl=\"0\">#{level(0, 'upperLetter', '%1.')}</w:lvlOverride>"
+    body = listed('first', 2) + listed('second', 3) + listed('third', 3) + listed('fourth', 2)
+    document = formatted_docx(body, abstracts: { '1' => [level(0, 'decimal', '%1.')] }, nums: { '2' => '1', '3' => ['1', letters] })
+
+    assert_equal <<~TEXT.chomp, Readword.convert(document)
+      1. first
+      - B. second
+      - C. third
+      4. fourth
+    TEXT
+  end
+
+  test 'heading numbers that Word takes from a multilevel list show in front of the .docx heading' do
+    styles = [style('Heading1', 'heading 1', '<w:numPr><w:numId w:val="5"/></w:numPr>'),
+              style('Heading2', 'heading 2', '<w:numPr><w:ilvl w:val="1"/><w:numId w:val="5"/></w:numPr>')]
+    abstracts = { '2' => [level(0, 'decimal', '%1', style: 'Heading1'), level(1, 'decimal', '%1.%2', style: 'Heading2')] }
+    body = styled('Scope', 'Heading1') + styled('Purpose', 'Heading2') + styled('Limits', 'Heading2') + styled('Method', 'Heading1')
+
+    assert_equal <<~TEXT.chomp, Readword.convert(formatted_docx(body, styles: styles, abstracts: abstracts, nums: { '5' => '2' }))
+      # 1 Scope
+
+      ## 1.1 Purpose
+
+      ## 1.2 Limits
+
+      # 2 Method
+    TEXT
+  end
+
+  test 'list items inside a .docx table cell keep their numbers and bullets in the cell' do
+    abstracts = { '0' => [level(0, 'bullet', 'o')], '1' => [level(0, 'decimal', '%1.')] }
+    body = table(row(cell(paragraph('Steps')), cell(listed('Prepare', 2) + listed('Measure', 2))),
+                 row(cell(paragraph('Simulants')), cell(listed('A', 1) + listed('B', 1))))
+
+    assert_equal <<~TEXT.chomp, Readword.convert(formatted_docx(body, abstracts: abstracts, nums: { '1' => '0', '2' => '1' }))
+      | Steps | 1. Prepare 2. Measure |
+      | --- | --- |
+      | Simulants | • A • B |
+    TEXT
+  end
+
+  test 'a .docx table row shorter than the first is padded to its width, and pipes inside cells are escaped' do
+    body = table(row(cell(paragraph('Substance')), cell(paragraph('Result'))), row(cell(paragraph('A|B'))))
+
+    assert_equal "| Substance | Result |\n| --- | --- |\n| A\\|B |  |", Readword.convert(docx(body))
+  end
+
+  test 'a paragraph that starts like Markdown syntax is escaped so it stays text' do
+    body = paragraph('# of samples: 5') + paragraph('> 10 mg/kg') + paragraph('| not a table')
+
+    assert_equal "\\# of samples: 5\n\n\\> 10 mg/kg\n\n\\| not a table", Readword.convert(docx(body))
+  end
+
   test 'each refusal reason has its own message' do
     messages = {
       Readword::UNREADABLE => 'The file could not be read as a Word document (.doc or .docx).',
@@ -390,6 +541,37 @@ class ReadwordTest < Minitest::Test
 
   def table(*rows)
     "<w:tbl>#{rows.join}</w:tbl>"
+  end
+
+  def styled(text, style_id)
+    "<w:p><w:pPr><w:pStyle w:val=\"#{style_id}\"/></w:pPr><w:r><w:t>#{text}</w:t></w:r></w:p>"
+  end
+
+  def listed(text, num_id, ilvl = 0)
+    "<w:p><w:pPr><w:numPr><w:ilvl w:val=\"#{ilvl}\"/><w:numId w:val=\"#{num_id}\"/></w:numPr></w:pPr><w:r><w:t>#{text}</w:t></w:r></w:p>"
+  end
+
+  def style(id, name, properties = '', based_on: nil)
+    parent = based_on ? "<w:basedOn w:val=\"#{based_on}\"/>" : ''
+    "<w:style w:type=\"paragraph\" w:styleId=\"#{id}\"><w:name w:val=\"#{name}\"/>#{parent}<w:pPr>#{properties}</w:pPr></w:style>"
+  end
+
+  def level(ilvl, format, text, style: nil)
+    linked = style ? "<w:pStyle w:val=\"#{style}\"/>" : ''
+    "<w:lvl w:ilvl=\"#{ilvl}\"><w:start w:val=\"1\"/><w:numFmt w:val=\"#{format}\"/>#{linked}<w:lvlText w:val=\"#{text}\"/></w:lvl>"
+  end
+
+  def formatted_docx(body, styles: [], abstracts: {}, nums: {})
+    lists = abstracts.map { |id, levels| "<w:abstractNum w:abstractNumId=\"#{id}\">#{levels.join}</w:abstractNum>" }
+    lists += nums.map do |id, (abstract, overrides)|
+      "<w:num w:numId=\"#{id}\"><w:abstractNumId w:val=\"#{abstract}\"/>#{overrides}</w:num>"
+    end
+    parts = { 'word/styles.xml' => "<w:styles #{NAMESPACES}>#{styles.join}</w:styles>",
+              'word/numbering.xml' => "<w:numbering #{NAMESPACES}>#{lists.join}</w:numbering>" }
+    relationships = %w[styles numbering].map do |type|
+      "<Relationship Id=\"#{type}\" Type=\"#{RELATIONSHIPS}/#{type}\" Target=\"#{type}.xml\"/>"
+    end
+    docx(body, parts: parts, relationships: relationships.join)
   end
 
   def docx(body, parts: {}, relationships: '')

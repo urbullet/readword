@@ -45,7 +45,7 @@ module Readword
   end
 
   def self.convert(bytes, max_characters: nil)
-    text = reader(bytes.b).lines.map(&:rstrip).join("\n").gsub(/\n{3,}/, "\n\n").strip
+    text = Markdown.render(reader(bytes.b).blocks).split("\n").map(&:rstrip).join("\n").gsub(/\n{3,}/, "\n\n").strip
     raise Error, NO_TEXT if text.empty?
     raise Error, TOO_LONG if max_characters && text.size > max_characters
 
@@ -64,10 +64,6 @@ module Readword
   end
   private_class_method :reader
 
-  def self.row_lines(cells)
-    cells.all? { |cell| blank?(cell) } ? [] : ["| #{cells.join(' | ')} |"]
-  end
-
   def self.symbol(font, code)
     return SYMBOL_FONT.fetch(code & 0xFF, '') if font.to_s.casecmp?('Symbol')
 
@@ -83,6 +79,8 @@ module Readword
   end
 end
 
+require_relative 'readword/markdown'
+require_relative 'readword/numbering'
 require_relative 'readword/binary'
 require_relative 'readword/compound_file'
 require_relative 'readword/doc'
