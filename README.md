@@ -90,7 +90,7 @@ Readword.convert(File.binread('report.docx'), max_characters: 150_000)
 - Size limits on unpacked XML, XML nodes, text and formatting, so a small zip bomb or a crafted file cannot make it use gigabytes of memory.
 - XML parts that declare their own entities are refused, which stops entity bombs.
 - Loop guards in the `.doc` container reader, so a crafted sector chain cannot make it run forever.
-- Fuzzed with 3,000,000 broken copies of real Word files without a crash, hang or memory blowup, and fuzzed again after headings and lists were added.
+- Fuzzed with 3,000,000 broken copies of real Word files, and 300,000 more after headings and lists were added, with no crash and no hang. The worst crafted files found so far use under 50 MB of memory.
 
 ## How it was checked
 
