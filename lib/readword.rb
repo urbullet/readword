@@ -16,6 +16,8 @@ module Readword
   }.freeze
   ZIP_SIGNATURE = "PK\x03\x04".b.freeze
   DEFAULT_MAX_SIZE = 32
+  LINK_SWITCHES = ['\\l', '\\o', '\\t'].freeze
+  WEB_ADDRESS = %r{\A((https?|ftp)://|mailto:)[^[:cntrl:]]*\z}i
   MEGABYTE = 1024 * 1024
 
   UNREADABLE = :unreadable
@@ -73,6 +75,22 @@ module Readword
     code.between?(0x20, 0xD7FF) ? code.chr(Encoding::UTF_8) : ''
   end
 
+  def self.hyperlink(code)
+    words = code.to_s.scan(/"[^"]*"|\S+/)
+    return unless words.shift&.casecmp?('HYPERLINK')
+
+    while (word = words.shift)
+      if word.start_with?('\\')
+        words.shift if LINK_SWITCHES.include?(word.downcase)
+        next
+      end
+      url = word.delete('"')
+      return url if WEB_ADDRESS.match?(url)
+
+      break
+    end
+  end
+
   def self.blank?(text)
     text.nil? || text.match?(/\A[[:space:]]*\z/)
   end
@@ -83,6 +101,7 @@ module Readword
 end
 
 require_relative 'readword/markdown'
+require_relative 'readword/inline'
 require_relative 'readword/numbering'
 require_relative 'readword/binary'
 require_relative 'readword/compound_file'

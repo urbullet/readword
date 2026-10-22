@@ -8,7 +8,8 @@ class ReadwordTest < Minitest::Test
   NAMESPACES = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ' \
                'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" ' \
                'xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" ' \
-               'xmlns:v="urn:schemas-microsoft-com:vml"'
+               'xmlns:v="urn:schemas-microsoft-com:vml" ' \
+               'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
   RELATIONSHIPS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 
   test 'a .docx results table becomes one line per row, keeping empty and merged cells in their columns' do
@@ -302,6 +303,20 @@ class ReadwordTest < Minitest::Test
     TEXT
   end
 
+  test 'a .doc keeps bold, italics and links, leaves headings and header cells plain, and keeps bold inside the table' do
+    assert_equal <<~TEXT.chomp, Readword.convert(fixture('formatting_report.doc'))
+      # Results
+
+      **Bisphenol A** was *not* detected, see the [method](https://example.com/method).
+
+      | Substance | Result |
+      | --- | --- |
+      | Benzene | **10** |
+
+      Limits: *see* the ***annex***.
+    TEXT
+  end
+
   test 'a page break inside a .doc paragraph breaks the line without starting a new paragraph' do
     bytes = fixture('lims_report_8bit.doc')
 
@@ -578,6 +593,55 @@ class ReadwordTest < Minitest::Test
     bytes = docx(paragraph('Results') + (' ' * (Readword::MEGABYTE + 1)))
 
     assert_equal(['Results'] * 2, [nil, 0].map { |max_size| Readword.convert(bytes, max_size: max_size) })
+  end
+
+  test 'bold and italic runs in a .docx become Markdown emphasis, with runs Word split merged back' do
+    body = '<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Bis</w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">phenol </w:t></w:r>' \
+           '<w:r><w:t xml:space="preserve">A was </w:t></w:r><w:r><w:rPr><w:i/></w:rPr><w:t>not</w:t></w:r>' \
+           '<w:r><w:rPr><w:b w:val="0"/></w:rPr><w:t xml:space="preserve"> detected, </w:t></w:r>' \
+           '<w:r><w:rPr><w:b/><w:i/></w:rPr><w:t>see note</w:t></w:r><w:r><w:t>.</w:t></w:r></w:p>'
+
+    assert_equal '**Bisphenol** A was *not* detected, ***see note***.', Readword.convert(docx(body))
+  end
+
+  test 'emphasis inside a word is dropped, and literal asterisks inside bold are escaped' do
+    body = '<w:p><w:r><w:t xml:space="preserve">7th </w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>para</w:t></w:r><w:r><w:t>graph, </w:t></w:r>' \
+           '<w:r><w:rPr><w:b/></w:rPr><w:t>***</w:t></w:r><w:r><w:t xml:space="preserve"> p&lt;0.05*</w:t></w:r></w:p>'
+
+    assert_equal '7th paragraph, **\\*\\*\\*** p<0.05*', Readword.convert(docx(body))
+  end
+
+  test 'links in a .docx keep their web address, from a hyperlink or a HYPERLINK field' do
+    relationships = '<Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" ' \
+                    'Target="https://example.com/method" TargetMode="External"/>'
+    body = '<w:p><w:r><w:t xml:space="preserve">See the </w:t></w:r><w:hyperlink r:id="rId9"><w:r><w:t>method</w:t></w:r></w:hyperlink>' \
+           '<w:r><w:t xml:space="preserve"> and the </w:t></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r>' \
+           '<w:r><w:instrText xml:space="preserve"> HYPERLINK "https://example.com/limits" \\o "Limits" </w:instrText></w:r>' \
+           '<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>limits</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>' \
+           '<w:r><w:t>.</w:t></w:r></w:p>'
+
+    assert_equal 'See the [method](https://example.com/method) and the [limits](https://example.com/limits).',
+                 Readword.convert(docx(body, relationships: relationships))
+  end
+
+  test 'a link to anything but a web or email address, or with a control character in it, keeps only its text' do
+    relationships = '<Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" ' \
+                    'Target="javascript:alert(1)" TargetMode="External"/>'
+    body = '<w:p><w:hyperlink r:id="rId9"><w:r><w:t>method</w:t></w:r></w:hyperlink><w:r><w:t xml:space="preserve"> and </w:t></w:r>' \
+           '<w:r><w:fldChar w:fldCharType="begin"/></w:r>' \
+           '<w:r><w:instrText xml:space="preserve"> HYPERLINK "https://example.com/a&#9;b" </w:instrText></w:r>' \
+           '<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>limits</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'
+
+    assert_equal 'method and limits', Readword.convert(docx(body, relationships: relationships))
+  end
+
+  test 'a .docx character style such as Strong reads as bold, while bold in a heading stays plain' do
+    styles = [style('Heading1', 'heading 1'),
+              '<w:style w:type="character" w:styleId="Strong"><w:name w:val="Strong"/><w:rPr><w:b/></w:rPr></w:style>']
+    body = '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Scope</w:t></w:r></w:p>' \
+           '<w:p><w:r><w:rPr><w:rStyle w:val="Strong"/></w:rPr><w:t>Result:</w:t></w:r><w:r><w:t xml:space="preserve"> 10 mg/kg</w:t></w:r></w:p>'
+
+    assert_equal "# Scope\n\n**Result:** 10 mg/kg", Readword.convert(formatted_docx(body, styles: styles))
   end
 
   test 'each refusal reason has its own message' do

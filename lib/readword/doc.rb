@@ -46,9 +46,12 @@ module Readword
 
     # Paragraph sprms: in a table, end of a table row, and the same two for a table nested in a cell.
     PARAGRAPH_SPRMS = { 0x2416 => :in_table, 0x2417 => :row_end, 0x244B => :inner_cell, 0x244C => :inner_row_end }.freeze
-    # sprmCFRMarkDel: deleted with Track Changes. Word writes 1, or 0x81, a ToggleOperand meaning the opposite of the style.
+    # sprmCFRMarkDel (deleted with Track Changes), sprmCFBold and sprmCFItalic. Their ToggleOperand is 1, or 0x81 for the opposite of the style.
     DELETED = 0x0800
-    DELETED_VALUES = [0x01, 0x81].freeze
+    BOLD = 0x0835
+    ITALIC = 0x0836
+    ON_VALUES = [0x01, 0x81].freeze
+    PLAIN = [false, false, nil].freeze
     # sprmCSymbol: Insert Symbol stores "(" in the text, and the font number and real character here.
     SYMBOL = 0x6A09
     SYMBOL_PLACEHOLDER = '('
@@ -114,12 +117,13 @@ module Readword
       @chains = {}
       @paragraph_start = 0
       @row = []
-      @text = +''
+      @text = []
+      @format = PLAIN
       read_characters(pieces)
       if @row.any?
         end_row
       else
-        @blocks << Paragraph.new(text: @text)
+        @blocks << Paragraph.new(text: Inline.render(@text))
       end
       @blocks
     end
@@ -130,25 +134,55 @@ module Readword
     def read_characters(pieces)
       fields = []
       code_depth = 0
+      link = nil
       each_character(pieces) do |character, offset, width|
-        marks = @marked.empty? ? {} : run_flags(@marked, offset)
+        marks = @marked.empty? ? NO_FLAGS : run_flags(@marked, offset)
         next if marks[:deleted]
 
         character = font_symbol(*marks[:symbol]) if marks[:symbol] && character == SYMBOL_PLACEHOLDER
         case character
         when FIELD_BEGIN
-          fields.push(:code)
+          fields.push({ state: :code, code: +'' })
           code_depth += 1
         when FIELD_SEPARATOR
-          if fields.last == :code
-            fields[-1] = :result
+          field = fields.last
+          if field && field[:state] == :code
+            field.merge!(state: :result, link: Readword.hyperlink(field[:code]))
             code_depth -= 1
           end
+          link = field_link(fields)
         when FIELD_END
-          code_depth -= 1 if fields.pop == :code
+          code_depth -= 1 if fields.pop&.fetch(:state) == :code
+          link = field_link(fields)
         else
-          read_character(character, offset, width) if code_depth.zero?
+          if code_depth.zero?
+            @format = text_format(marks, link)
+            read_character(character, offset, width)
+          else
+            fields.reverse_each.find { |field| field[:state] == :code }&.fetch(:code)&.<<(character)
+          end
         end
+      end
+    end
+
+    def field_link(fields)
+      fields.reverse_each { |field| return field[:link] if field[:link] }
+      nil
+    end
+
+    def text_format(marks, link)
+      bold = marks[:bold] == true
+      italic = marks[:italic] == true
+      bold == @format[0] && italic == @format[1] && link == @format[2] ? @format : [bold, italic, link]
+    end
+
+    def append(text, format = PLAIN)
+      last = @text.last
+      bold, italic, link = format
+      if last && @text.size > @paragraph_start && last.bold == bold && last.italic == italic && last.link == link
+        last.text << text
+      else
+        @text << Span.new(text.dup, bold, italic, link)
       end
     end
 
@@ -160,9 +194,9 @@ module Readword
       elsif character == PARAGRAPH_MARK || (PARAGRAPH_ENDS.include?(character) && paragraph_end?(offset, width))
         end_paragraph(paragraph_flags(offset))
       elsif PARAGRAPH_ENDS.include?(character)
-        @text << "\n"
+        append("\n", @format)
       elsif character >= ' ' || REPLACEMENTS.key?(character)
-        @text << REPLACEMENTS.fetch(character, character)
+        append(REPLACEMENTS.fetch(character, character), @format)
       end
     end
 
@@ -171,34 +205,35 @@ module Readword
       elsif flags[:inner_cell] then end_cell(flags)
       elsif flags[:in_table]
         label_paragraph(flags)
-        @text << ' '
+        append(' ')
         @paragraph_start = @text.size
       else
         end_row if @row.any?
-        @blocks << Paragraph.new(text: @text, heading: heading_level(flags), list: list_item(flags))
-        @text = +''
+        heading = heading_level(flags)
+        @blocks << Paragraph.new(text: Inline.render(@text, bold: !heading), heading: heading, list: list_item(flags))
+        @text = []
         @paragraph_start = 0
       end
     end
 
     def end_cell(flags = nil)
       label_paragraph(flags) if flags
-      @row << Readword.squish(@text)
-      @text = +''
+      @row << Readword.squish(Inline.render(@text))
+      @text = []
       @paragraph_start = 0
     end
 
     def end_row
-      end_cell unless Readword.blank?(@text)
+      end_cell unless Readword.blank?(@text.map(&:text).join)
       @blocks << Row.new(@row) unless @row.all? { |cell| Readword.blank?(cell) }
       @row = []
-      @text = +''
+      @text = []
       @paragraph_start = 0
     end
 
     def label_paragraph(flags)
       item = list_item(flags) or return
-      @text.insert(@paragraph_start, "#{item.bullet ? '•' : item.label} ")
+      @text.insert(@paragraph_start, Span.new("#{item.bullet ? '•' : item.label} ", false, false, nil))
     end
 
     def heading_level(flags)
@@ -376,7 +411,7 @@ module Readword
     def marked_runs
       runs = []
       property_pages(FIB_CHPX_TABLE, FIB_CHPX_TABLE_BYTES).each do |offset|
-        runs.concat(character_runs(offset).select { |run| run.flags[:deleted] || run.flags[:symbol] })
+        runs.concat(character_runs(offset).select { |run| run.flags.values_at(:deleted, :symbol, :bold, :italic).any? })
         raise Error, TOO_LONG if runs.size > @max_text_positions
       end
       runs.sort_by(&:start)
@@ -447,7 +482,9 @@ module Readword
         size = operand_size(sprm, grpprl, position + 2) or break
         operand = grpprl.byteslice(position + 2, size).to_s
         if PARAGRAPH_SPRMS.key?(sprm) then flags[PARAGRAPH_SPRMS[sprm]] = operand.getbyte(0) == 1
-        elsif sprm == DELETED then flags[:deleted] = DELETED_VALUES.include?(operand.getbyte(0))
+        elsif sprm == DELETED then flags[:deleted] = ON_VALUES.include?(operand.getbyte(0))
+        elsif sprm == BOLD then flags[:bold] = ON_VALUES.include?(operand.getbyte(0))
+        elsif sprm == ITALIC then flags[:italic] = ON_VALUES.include?(operand.getbyte(0))
         elsif sprm == SYMBOL then flags[:symbol] = [u16(operand, 0).to_i, u16(operand, 2).to_i]
         elsif sprm == OUTLINE_LEVEL then flags[:outline] = operand.getbyte(0)
         elsif sprm == LIST_LEVEL then flags[:list_level] = operand.getbyte(0)
@@ -498,10 +535,10 @@ module Readword
 
     def run_flags(runs, offset)
       index = (runs.bsearch_index { |run| run.start > offset } || runs.size) - 1
-      return {} if index.negative?
+      return NO_FLAGS if index.negative?
 
       run = runs[index]
-      offset < run.finish ? run.flags : {}
+      offset < run.finish ? run.flags : NO_FLAGS
     end
 
     def font_symbol(font, code)

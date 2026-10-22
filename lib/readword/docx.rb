@@ -12,6 +12,10 @@ module Readword
     RELATIONSHIP = %r{/relationships/(officeDocument|header|footer|footnotes|endnotes|styles|numbering)\z}
     SKIPPED = %w[del moveFrom instrText delText rPr pPr sectPr tblPr trPr tcPr sdtPr].freeze
     CHARACTERS = %w[t tab ptab br cr noBreakHyphen sym].freeze
+    OFF = %w[0 false off].freeze
+    LINK = %r{/relationships/hyperlink\z}
+    Format = Struct.new(:bold, :italic, :link)
+    PLAIN = Format.new(false, false, nil).freeze
     SEPARATOR_NOTES = %w[separator continuationSeparator continuationNotice].freeze
     HEADING_STYLE = /\Aheading ([1-9])\z/i
     TITLE_STYLE = /\Atitle\z/i
@@ -94,6 +98,7 @@ module Readword
 
     def part(path)
       @counter.reset
+      @links = link_targets(path)
       content(xml(path))
     end
 
@@ -104,6 +109,7 @@ module Readword
     def notes(paths)
       paths.flat_map do |path|
         @counter.reset
+        @links = link_targets(path)
         found = Array(xml(path)&.xpath('//*[self::footnote or self::endnote]'))
         found.reject { |note| SEPARATOR_NOTES.include?(note['type']) }.flat_map { |note| content(note) }
       end
@@ -125,11 +131,23 @@ module Readword
 
     def paragraph_blocks(paragraph)
       boxes = []
-      text = inline(paragraph, boxes, [])
+      spans = []
       properties = child_named(paragraph, 'pPr')
       style = value(properties, 'pStyle')
-      block = Paragraph.new(text: text, heading: heading_level(properties, style), list: list_item(properties, style))
+      heading = heading_level(properties, style)
+      inline(paragraph, boxes, [], spans, PLAIN)
+      block = Paragraph.new(text: Inline.render(spans, bold: !heading), heading: heading, list: list_item(properties, style))
       [block, *boxes.flat_map { |box| content(box) }]
+    end
+
+    def link_targets(path)
+      document = path && xml(File.join(File.dirname(path), '_rels', "#{File.basename(path)}.rels"))
+      return {} unless document
+
+      document.xpath('//Relationship').each_with_object({}) do |relationship, links|
+        target = relationship['Target'].to_s.scrub('')
+        links[relationship['Id']] = target if LINK.match?(relationship['Type'].to_s) && WEB_ADDRESS.match?(target)
+      end
     end
 
     def heading_level(properties, style)
@@ -171,8 +189,13 @@ module Readword
     end
 
     def read_styles(document)
+      @character_styles = {}
       return {} unless document
 
+      @character_styles = document.xpath('//style[@type="character"]').to_h do |style|
+        properties = child_named(style, 'rPr')
+        [style['styleId'], { bold: flag(properties, 'b', false), italic: flag(properties, 'i', false) }]
+      end
       document.xpath('//style[@type="paragraph"]').to_h do |style|
         properties = child_named(style, 'pPr')
         numbering = child_named(properties, 'numPr')
@@ -213,19 +236,47 @@ module Readword
       text.split(/(%[1-9])/).reject(&:empty?).map { |part| LEVEL_REFERENCE.match?(part) ? part[1].to_i - 1 : part }
     end
 
-    def inline(node, boxes, fields)
-      node.element_children.map do |child|
+    def inline(node, boxes, fields, spans, format)
+      node.element_children.each do |child|
         case child.name
-        when *CHARACTERS then fields.include?(:code) ? '' : character(child)
+        when *CHARACTERS then spans << Span.new(character(child), format.bold, format.italic, format.link || field_link(fields)) unless code?(fields)
+        when 'instrText' then fields.last[:code] << child.text.scrub('') if code?(fields)
         when 'fldChar' then field_char(child['fldCharType'], fields)
-        when 'txbxContent'
-          boxes << child
-          ''
-        when 'AlternateContent' then inline(alternative(child), boxes, fields)
-        when *SKIPPED then ''
-        else inline(child, boxes, fields)
+        when 'r' then inline(child, boxes, fields, spans, run_format(child, format))
+        when 'hyperlink' then inline(child, boxes, fields, spans, link_format(child, format))
+        when 'txbxContent' then boxes << child
+        when 'AlternateContent' then inline(alternative(child), boxes, fields, spans, format)
+        when *SKIPPED then nil
+        else inline(child, boxes, fields, spans, format)
         end
-      end.join
+      end
+    end
+
+    def run_format(run, format)
+      properties = child_named(run, 'rPr')
+      return format unless properties
+
+      style = @character_styles[value(properties, 'rStyle')] || {}
+      Format.new(flag(properties, 'b', style[:bold]), flag(properties, 'i', style[:italic]), format.link)
+    end
+
+    def flag(properties, name, inherited)
+      node = child_named(properties, name)
+      node ? !OFF.include?(node['val'].to_s.downcase) : inherited || false
+    end
+
+    def link_format(node, format)
+      target = @links[node['id'].to_s]
+      target ? Format.new(format.bold, format.italic, target) : format
+    end
+
+    def code?(fields)
+      fields.any? { |field| field[:state] == :code }
+    end
+
+    def field_link(fields)
+      fields.reverse_each { |field| return field[:link] if field[:state] == :result && field[:link] }
+      nil
     end
 
     def character(node)
@@ -240,11 +291,12 @@ module Readword
 
     def field_char(type, fields)
       case type
-      when 'begin' then fields.push(:code)
-      when 'separate' then fields[-1] = :result if fields.last == :code
+      when 'begin' then fields.push({ state: :code, code: +'' })
+      when 'separate'
+        field = fields.last
+        field.merge!(state: :result, link: Readword.hyperlink(field[:code])) if field && field[:state] == :code
       when 'end' then fields.pop
       end
-      ''
     end
 
     def alternative(node)

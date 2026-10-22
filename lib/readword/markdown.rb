@@ -4,6 +4,7 @@ module Readword
   Paragraph = Struct.new(:text, :heading, :list, keyword_init: true)
   ListItem = Struct.new(:level, :label, :bullet, :list, keyword_init: true)
   Row = Struct.new(:cells)
+  Span = Struct.new(:text, :bold, :italic, :link)
 
   # Writes the readers' paragraphs and table rows as Markdown: headings, nested lists and pipe tables.
   module Markdown
@@ -73,11 +74,18 @@ module Readword
 
     def table(rows)
       width = rows.map(&:size).max
+      header, *body = rows
+      rows = [header.map { |cell| unbold(cell) }, *body]
       lines = rows.map do |cells|
         padded = cells.map { |cell| cell.gsub('|', '\|') } + Array.new(width - cells.size, '')
         "| #{padded.join(' | ')} |"
       end
       lines.insert(1, "| #{Array.new(width, '---').join(' | ')} |").join("\n")
+    end
+
+    def unbold(cell)
+      inner = cell[/\A\*\*(.*)\*\*\z/m, 1]
+      inner && !inner.include?('**') ? inner : cell
     end
 
     def escape(text)
