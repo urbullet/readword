@@ -43,8 +43,9 @@ End of report.
 - Tracked changes as if accepted: inserted text stays and deleted text goes.
 - Field results, such as page numbers, dates and merge fields. Field codes are left out.
 - Characters added with Insert Symbol, such as µ, ±, ≤ and °, as the real characters.
+- Bold, italics and links, as `**bold**`, `*italic*` and `[text](https://example.com)`. Only links to web pages and email addresses are kept. Headings, and header cells that are bold as a whole, stay plain.
 
-It does not keep bold, italics, links, images, charts, comments or embedded objects (an Excel table pasted into the document as an object, for example).
+It does not keep underlining, colors, images, charts, comments in `.docx` files, or embedded objects (an Excel table pasted into the document as an object, for example).
 
 ## Use it with a coding agent
 
@@ -57,13 +58,14 @@ To read a Word file (.doc or .docx), run `readword path/to/file` and read the Ma
 ## Command line
 
 ```console
-$ readword [--max-characters N] FILE...
+$ readword [--max-characters N] [--max-size MB] FILE...
 ```
 
 - With several files, each one starts with a `==> path <==` line.
 - Use `-` as the file name to read from standard input.
 - If a file cannot be read, the reason goes to standard error and the exit code is 1. The other files are still printed.
 - `--max-characters N` refuses documents longer than N characters, which is useful to stay inside a model's context window.
+- `--max-size MB` sets the size limit described under [Safe on untrusted files](#safe-on-untrusted-files). The default is 32, and 0 turns the limit off.
 
 ## Use it from Ruby
 
@@ -72,6 +74,7 @@ require 'readword'
 
 Readword.convert_file('report.doc')                      # => "# Test report\n\n..."
 Readword.convert(File.binread('report.docx'), max_characters: 150_000)
+Readword.convert_file('manual.docx', max_size: 100)      # a size limit of 100 MB instead of 32
 ```
 
 `convert` takes the file's bytes and works out the format from them, so a `.docx` saved with a `.doc` name still reads. Files that cannot be read raise `Readword::Error`. Its `reason` is one of:
@@ -80,17 +83,18 @@ Readword.convert(File.binread('report.docx'), max_characters: 150_000)
 | --- | --- |
 | `:unreadable` | Not a Word document (RTF or plain text named `.doc`, for example), or damaged |
 | `:no_text` | The document has no text, only images for example |
-| `:too_long` | Over `max_characters`, or over the reader's own size limits |
+| `:too_long` | Over `max_characters`, or over the size limit (`max_size`) |
 | `:password_protected` | Encrypted with a password |
 | `:old_format` | Saved by Word 6 or Word 95 |
 
 ## Safe on untrusted files
 
 - The `.doc` reader is plain Ruby, so a crafted file cannot cause the memory errors that C readers are prone to. The `.docx` reader uses Nokogiri and rubyzip.
-- Size limits on unpacked XML, XML nodes, text and formatting, so a small zip bomb or a crafted file cannot make it use gigabytes of memory.
+- A size limit on the unpacked XML, its elements, the text and the formatting, so a small zip bomb or a crafted file cannot make it use gigabytes of memory. It is 32 MB by default, which reads a 300-page report. Dense documents count as bigger, since the limit also counts XML elements. At the default, the worst file we could craft, an 11 KB zip holding 1.28 million empty paragraphs, takes about 10 seconds and 330 MB of memory. Lower `max_size` for tighter bounds, or raise it for bigger documents.
 - XML parts that declare their own entities are refused, which stops entity bombs.
+- Links are kept only when they point to a web page or an email address, so a document cannot put a `javascript:` link into the Markdown.
 - Loop guards in the `.doc` container reader, so a crafted sector chain cannot make it run forever.
-- Fuzzed with 3,000,000 broken copies of real Word files, and 300,000 more after headings and lists were added, with no crash and no hang. The worst crafted files found so far use under 50 MB of memory.
+- Fuzzed with 3,000,000 broken copies of real Word files, 300,000 more after headings and lists were added, and 50,000 more after bold, italics and links, with no crash and no hang.
 
 ## How it was checked
 
