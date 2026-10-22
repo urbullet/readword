@@ -129,15 +129,13 @@ module Readword
     end
 
     def heading_level(properties, style)
-      outline = value(properties, 'outlineLvl') || style_chain(style).filter_map { |entry| entry[:outline] }.first
-      level = outline ? outline.to_i : style_chain(style).filter_map { |entry| named_level(entry[:name]) }.first
+      chain = style_chain(style)
+      outline = value(properties, 'outlineLvl') || chain.filter_map { |entry| entry[:outline] }.first
+      level = if outline then outline.to_i
+              elsif TITLE_STYLE.match?(chain.first&.fetch(:name).to_s) then 0
+              else chain.filter_map { |entry| HEADING_STYLE.match(entry[:name].to_s)&.then { |match| match[1].to_i - 1 } }.first
+              end
       [level + 1, 6].min if level&.between?(0, 8)
-    end
-
-    def named_level(name)
-      return 0 if TITLE_STYLE.match?(name.to_s)
-
-      HEADING_STYLE.match(name.to_s)&.then { |match| match[1].to_i - 1 }
     end
 
     def list_item(properties, style)
@@ -149,8 +147,8 @@ module Readword
         num_id = inherited&.fetch(:num_id)
         level ||= inherited&.fetch(:level) || style_level(num_id, style)
       end
-      list = @lists[num_id] if num_id && num_id != '0'
-      list && @counter.next_item(list[:key], list[:levels], level.to_i.clamp(0, 8), list[:starts])
+      list = @lists[num_id] if num_id && num_id != '0' && level.to_i.between?(0, 8)
+      list && @counter.next_item(list[:key], list[:levels], level.to_i, list[:starts])
     end
 
     def style_level(num_id, style)

@@ -21,6 +21,7 @@ module Readword
       definition = levels[level] or return
       counts = (@counts[key] ||= {})
       counts.delete_if { |deeper, _| deeper > level }
+      (0...level).each { |higher| counts[higher] ||= start(levels, higher, starts) }
       counts[level] = counts.key?(level) ? counts[level] + 1 : start(levels, level, starts)
       return ListItem.new(level: level, label: nil, bullet: true, list: key) if definition.format == :bullet
 
@@ -38,6 +39,7 @@ module Readword
 
     def number(value, format)
       case format
+      when :none then ''
       when :upper_roman then roman(value)
       when :lower_roman then roman(value).downcase
       when :upper_letter then letter(value)

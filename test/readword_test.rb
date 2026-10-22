@@ -264,6 +264,46 @@ class ReadwordTest < Minitest::Test
     assert_includes Readword.convert(bytes), '| Toluene | 108-88-3 | 120 15 |  |'
   end
 
+  test 'a .doc keeps its headings, heading numbers, nested bullets, numbered steps and the lists inside table cells' do
+    assert_equal <<~TEXT.chomp, Readword.convert(fixture('structured_report.doc'))
+      # Migration test report
+
+      # 1 Scope
+
+      Substances tested:
+
+      - Bisphenol A
+        - food simulant A
+      - Toluene
+
+      # 2 Method
+
+      ## 2.1 Conditions
+
+      1. Prepare the sample
+         - a) at 40 C
+         - b) for 10 days
+      2. Measure
+
+      ## 2.2 Results
+
+      | Substance | Result (ug/kg) |
+      | --- | --- |
+      | Benzene | 10 |
+      | Steps | 1. Fill 1. Seal |
+
+      End of report.
+    TEXT
+  end
+
+  test 'a page break inside a .doc paragraph breaks the line without starting a new paragraph' do
+    bytes = fixture('lims_report_8bit.doc')
+
+    assert bytes.sub!('Test Report No.') { "Test Report\fNo." }
+
+    assert Readword.convert(bytes).start_with?("Test Report\nNo. 2026/0816\n\nSimulant:")
+  end
+
   test 'a .doc that stores its text as single bytes, the way Word saves Western text, keeps its paragraphs, table rows and special characters' do
     assert_equal <<~TEXT.chomp, Readword.convert(fixture('lims_report_8bit.doc'))
       Test Report No. 2026/0816
@@ -456,6 +496,13 @@ class ReadwordTest < Minitest::Test
 
       3. continued
     TEXT
+  end
+
+  test 'a .docx list level numbered as none adds nothing to the labels below it, and list level 9 is body text' do
+    abstracts = { '1' => [level(0, 'none', '%1'), level(1, 'lowerLetter', '%1%2.')] }
+    body = listed('Scope', 2, 1) + listed('Body text', 2, 9)
+
+    assert_equal "- a. Scope\n\nBody text", Readword.convert(formatted_docx(body, abstracts: abstracts, nums: { '2' => '1' }))
   end
 
   test 'a .docx list that redefines a level keeps counting with its list but shows the new number style' do
