@@ -10,6 +10,7 @@ Gem::Specification.new do |spec|
   spec.description = 'Reads Word 97-2003 (.doc) and Word 2007+ (.docx) files without LibreOffice, Java or antiword, ' \
                      'and prints their text, tables, headers, footers and footnotes as Markdown. ' \
                      'Built for feeding Word documents to LLMs and coding agents, and safe on untrusted files.'
+  spec.homepage = 'https://github.com/urbullet/readword'
   spec.license = 'MIT'
   spec.required_ruby_version = '>= 3.1'
 
@@ -20,5 +21,8 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'nokogiri', '>= 1.13'
   spec.add_dependency 'rubyzip', '>= 2.3', '< 4'
 
+  spec.metadata['source_code_uri'] = spec.homepage
+  spec.metadata['changelog_uri'] = "#{spec.homepage}/blob/main/CHANGELOG.md"
+  spec.metadata['bug_tracker_uri'] = "#{spec.homepage}/issues"
   spec.metadata['rubygems_mfa_required'] = 'true'
 end
