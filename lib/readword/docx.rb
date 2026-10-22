@@ -6,9 +6,10 @@ module Readword
   # Reads the text of a Word 2007 or later .docx (ECMA-376 WordprocessingML) from its XML parts.
   class Docx
     MAX_XML_BYTES = 10 * 1024 * 1024
-    MAX_XML_NODES = 1_000_000
+    MAX_XML_NODES = 400_000
     MAX_GRID_SPAN = 63
     MAX_STYLE_DEPTH = 16
+    UTF16_STARTS = ["\xFF\xFE".b, "\xFE\xFF".b, "<\0".b, "\0<".b].freeze
     RELATIONSHIP = %r{/relationships/(officeDocument|header|footer|footnotes|endnotes|styles|numbering)\z}
     SKIPPED = %w[del moveFrom instrText delText rPr pPr sectPr tblPr trPr tcPr sdtPr].freeze
     CHARACTERS = %w[t tab ptab br cr noBreakHyphen sym].freeze
@@ -81,7 +82,9 @@ module Readword
       @budgets[budget][:bytes] += data.bytesize
       count_nodes(data.count('<&='), budget)
 
-      Nokogiri::XML(data).tap do |document|
+      utf16 = data.start_with?(*UTF16_STARTS)
+      data = data.b.force_encoding(Encoding::UTF_8).scrub unless utf16
+      Nokogiri::XML(data, nil, utf16 ? nil : 'UTF-8').tap do |document|
         raise Error, UNREADABLE if document.internal_subset
 
         document.remove_namespaces!
@@ -100,7 +103,7 @@ module Readword
     def notes(paths)
       paths.flat_map do |path|
         @counter.reset
-        found = Array(xml(path)&.xpath('//footnote | //endnote'))
+        found = Array(xml(path)&.xpath('//*[self::footnote or self::endnote]'))
         found.reject { |note| SEPARATOR_NOTES.include?(note['type']) }.flat_map { |note| content(note) }
       end
     end
@@ -226,7 +229,7 @@ module Readword
 
     def character(node)
       case node.name
-      when 't' then node.text
+      when 't' then node.text.scrub('')
       when 'tab', 'ptab' then "\t"
       when 'br', 'cr' then "\n"
       when 'noBreakHyphen' then '-'
@@ -285,7 +288,7 @@ module Readword
     end
 
     def value(node, name)
-      child_named(node, name)&.[]('val')
+      child_named(node, name)&.[]('val')&.scrub('')
     end
   end
 end

@@ -102,6 +102,12 @@ class ReadwordTest < Minitest::Test
     TEXT
   end
 
+  test 'an empty part in a .docx, such as an empty header, does not stop the rest from being read' do
+    relationships = "<Relationship Id=\"header\" Type=\"#{RELATIONSHIPS}/header\" Target=\"header1.xml\"/>"
+
+    assert_equal 'Results', Readword.convert(docx(paragraph('Results'), parts: { 'word/header1.xml' => '' }, relationships: relationships))
+  end
+
   test 'a .docx part listed more than once, in any letter case, is read once' do
     parts = {
       'word/header1.xml' => "<w:hdr #{NAMESPACES}>#{paragraph('Example Lab Test Report')}</w:hdr>",

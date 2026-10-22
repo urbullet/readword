@@ -42,6 +42,7 @@ module Readword
     # Limits against crafted files, so the reader cannot be made to work forever.
     MAX_PROPERTY_BYTES = 8 * 1024 * 1024
     MAX_TEXT_POSITIONS = 400_000
+    NO_FLAGS = {}.freeze
 
     # Paragraph sprms: in a table, end of a table row, and the same two for a table nested in a cell.
     PARAGRAPH_SPRMS = { 0x2416 => :in_table, 0x2417 => :row_end, 0x244B => :inner_cell, 0x244C => :inner_row_end }.freeze
@@ -362,12 +363,21 @@ module Readword
     end
 
     def paragraph_runs
-      property_pages(FIB_PAPX_TABLE, FIB_PAPX_TABLE_BYTES).flat_map { |offset| page_runs(offset) }.sort_by(&:start)
+      runs = []
+      property_pages(FIB_PAPX_TABLE, FIB_PAPX_TABLE_BYTES).each do |offset|
+        runs.concat(page_runs(offset))
+        raise Error, TOO_LONG if runs.size > MAX_TEXT_POSITIONS
+      end
+      runs.sort_by(&:start)
     end
 
     def marked_runs
-      runs = property_pages(FIB_CHPX_TABLE, FIB_CHPX_TABLE_BYTES).flat_map { |offset| character_runs(offset) }
-      runs.select { |run| run.flags[:deleted] || run.flags[:symbol] }.sort_by(&:start)
+      runs = []
+      property_pages(FIB_CHPX_TABLE, FIB_CHPX_TABLE_BYTES).each do |offset|
+        runs.concat(character_runs(offset).select { |run| run.flags[:deleted] || run.flags[:symbol] })
+        raise Error, TOO_LONG if runs.size > MAX_TEXT_POSITIONS
+      end
+      runs.sort_by(&:start)
     end
 
     # PlcBtePapx and PlcBteChpx: FC boundaries, then the FKP page numbers in the low 22 bits.
@@ -392,7 +402,7 @@ module Readword
       properties = {}
       Array.new(count) do |index|
         at = page.getbyte((4 * (count + 1)) + (13 * index)) * 2
-        Run.new(bounds[index], bounds[index + 1], at.zero? ? {} : (properties[at] ||= papx_flags(page, at)))
+        Run.new(bounds[index], bounds[index + 1], at.zero? ? NO_FLAGS : (properties[at] ||= papx_flags(page, at)))
       end
     end
 
@@ -408,7 +418,7 @@ module Readword
       properties = {}
       Array.new(count) do |index|
         at = page.getbyte((4 * (count + 1)) + index) * 2
-        Run.new(bounds[index], bounds[index + 1], at.zero? ? {} : (properties[at] ||= chpx_flags(page, at)))
+        Run.new(bounds[index], bounds[index + 1], at.zero? ? NO_FLAGS : (properties[at] ||= chpx_flags(page, at)))
       end
     end
 
