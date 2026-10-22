@@ -1,0 +1,44 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'optparse'
+require 'readword'
+
+options = {}
+parser = OptionParser.new do |opts|
+  opts.banner = 'Usage: readword [options] FILE...'
+  opts.separator ''
+  opts.separator 'Prints Word documents (.doc and .docx) as Markdown. Use - to read from standard input.'
+  opts.separator ''
+  opts.on('--max-characters N', Integer, 'Fail when a document has more than N characters') do |count|
+    options[:max_characters] = count
+  end
+  opts.on('-v', '--version', 'Print the version') do
+    puts Readword::VERSION
+    exit
+  end
+  opts.on('-h', '--help', 'Print this help') do
+    puts opts
+    exit
+  end
+end
+
+begin
+  paths = parser.parse(ARGV)
+rescue OptionParser::ParseError => e
+  abort("readword: #{e.message}\n\n#{parser}")
+end
+abort(parser.to_s) if paths.empty?
+
+failed = false
+paths.each_with_index do |path, index|
+  bytes = path == '-' ? $stdin.binmode.read : File.binread(path)
+  text = Readword.convert(bytes, **options)
+  puts if index.positive?
+  puts "==> #{path} <==" if paths.size > 1
+  puts text
+rescue Readword::Error, SystemCallError => e
+  warn "readword: #{path}: #{e.message}"
+  failed = true
+end
+exit(1) if failed
